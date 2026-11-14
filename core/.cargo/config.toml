@@ -1,0 +1,23 @@
+# NDK linkers for the Android targets (API 28 = minSdk). Paths are machine-specific;
+# ANDROID_NDK_HOME is also read by build scripts (cmake for libopus).
+[target.x86_64-linux-android]
+linker = "C:/Users/v1svaldis/AppData/Local/Android/Sdk/ndk/27.2.12479018/toolchains/llvm/prebuilt/windows-x86_64/bin/x86_64-linux-android28-clang.cmd"
+ar = "C:/Users/v1svaldis/AppData/Local/Android/Sdk/ndk/27.2.12479018/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-ar.exe"
+
+[target.aarch64-linux-android]
+linker = "C:/Users/v1svaldis/AppData/Local/Android/Sdk/ndk/27.2.12479018/toolchains/llvm/prebuilt/windows-x86_64/bin/aarch64-linux-android28-clang.cmd"
+ar = "C:/Users/v1svaldis/AppData/Local/Android/Sdk/ndk/27.2.12479018/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-ar.exe"
+
+[env]
+CC_x86_64_linux_android = "C:/Users/v1svaldis/AppData/Local/Android/Sdk/ndk/27.2.12479018/toolchains/llvm/prebuilt/windows-x86_64/bin/x86_64-linux-android28-clang.cmd"
+CC_aarch64_linux_android = "C:/Users/v1svaldis/AppData/Local/Android/Sdk/ndk/27.2.12479018/toolchains/llvm/prebuilt/windows-x86_64/bin/aarch64-linux-android28-clang.cmd"
+AR_x86_64_linux_android = "C:/Users/v1svaldis/AppData/Local/Android/Sdk/ndk/27.2.12479018/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-ar.exe"
+AR_aarch64_linux_android = "C:/Users/v1svaldis/AppData/Local/Android/Sdk/ndk/27.2.12479018/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-ar.exe"
+CMAKE_TOOLCHAIN_FILE_x86_64_linux_android = { value = "cmake/android-x86_64.cmake", relative = true }
+CMAKE_TOOLCHAIN_FILE_aarch64_linux_android = { value = "cmake/android-arm64-v8a.cmake", relative = true }
+CMAKE_GENERATOR = "Ninja"
+LIBOPUS_STATIC = "1"
+LIBOPUS_NO_PKG = "1"
+CXX_x86_64_linux_android = "C:/Users/v1svaldis/AppData/Local/Android/Sdk/ndk/27.2.12479018/toolchains/llvm/prebuilt/windows-x86_64/bin/x86_64-linux-android28-clang++.cmd"
+CXX_aarch64_linux_android = "C:/Users/v1svaldis/AppData/Local/Android/Sdk/ndk/27.2.12479018/toolchains/llvm/prebuilt/windows-x86_64/bin/aarch64-linux-android28-clang++.cmd"
+CMAKE_POLICY_VERSION_MINIMUM = "3.5"

@@ -1,24 +1,75 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+// ---------------------------------------------------------------- Rust core (core/)
+// Protocol, voice and crypto live in libopenspeak_core.so, built by cargo for each ABI.
+
+val rustAbis: List<String> =
+    (findProperty("rustAbis") as String? ?: "arm64-v8a,x86_64").split(',').map { it.trim() }.filter { it.isNotEmpty() }
+val rustTargets = mapOf("arm64-v8a" to "aarch64-linux-android", "x86_64" to "x86_64-linux-android")
+val rustDir = rootProject.file("core")
+val rustJniDir = layout.buildDirectory.dir("rustJniLibs").get().asFile
+
+val sdkDir: String = System.getenv("ANDROID_HOME") ?: Properties().run {
+    rootProject.file("local.properties").takeIf { it.exists() }?.inputStream()?.use { load(it) }
+    getProperty("sdk.dir") ?: ""
+}
+
+val cargoTasks = rustAbis.map { abi ->
+    val target = rustTargets.getValue(abi)
+    tasks.register<Exec>("cargoBuild-$abi") {
+        group = "rust"
+        description = "Builds the Rust core for $abi"
+        workingDir = rustDir
+        commandLine("cargo", "build", "--release", "--target", target)
+        // libopus is built with CMake + Ninja from the SDK.
+        val cmakeBin = File(sdkDir, "cmake/3.22.1/bin").absolutePath
+        environment("PATH", cmakeBin + File.pathSeparator + System.getenv("PATH"))
+        if (System.getenv("ANDROID_NDK_HOME") == null) environment("ANDROID_NDK_HOME", File(sdkDir, "ndk/27.2.12479018").absolutePath)
+        inputs.dir(File(rustDir, "src"))
+        inputs.file(File(rustDir, "Cargo.toml"))
+        outputs.file(File(rustDir, "target/$target/release/libopenspeak_core.so"))
+        doLast {
+            copy {
+                from(File(rustDir, "target/$target/release/libopenspeak_core.so"))
+                into(File(rustJniDir, abi))
+            }
+        }
+    }
+}
+
+tasks.matching { it.name.startsWith("merge") && it.name.endsWith("JniLibFolders") }.configureEach {
+    dependsOn(cargoTasks)
+}
+
 android {
-    namespace = "openspeak.app"
+    namespace = "com.v1svaldis.openspeak"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "org.openspeak.android"
-        minSdk = 26
+        applicationId = "com.v1svaldis.openspeak"
+        minSdk = 28
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.2.0"
+        versionCode = 3
+        versionName = "0.3.0"
+        ndk {
+            // Real phones are arm64; x86_64 is for the emulator. -PrustAbis=arm64-v8a builds one.
+            abiFilters += rustAbis
+        }
     }
+
+    sourceSets["main"].jniLibs.srcDir(rustJniDir)
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             // Signed with the debug key so the APK installs without extra setup.
             signingConfig = signingConfigs.getByName("debug")
         }
@@ -35,6 +86,8 @@ android {
         compose = true
     }
     packaging {
+        // Compressed native libraries: the APK shrinks by more than half (the .so files compress ~3x).
+        jniLibs.useLegacyPackaging = true
         resources {
             excludes += setOf("META-INF/versions/9/OSGI-INF/MANIFEST.MF", "META-INF/*.md", "META-INF/LICENSE*", "META-INF/NOTICE*")
         }
@@ -42,8 +95,6 @@ android {
 }
 
 dependencies {
-    implementation(project(":ts3j"))
-    implementation("io.github.jaredmdobson:concentus:1.0.2")
     implementation("io.getstream:stream-webrtc-android:1.3.10")
 
     implementation(platform("androidx.compose:compose-bom:2024.09.03"))
