@@ -1,7 +1,7 @@
-package ts4droid.app
+package openspeak.app
 
 import android.app.Application
-import ts4droid.app.ts.TsSession
+import openspeak.app.ts.TsSession
 
 class App : Application() {
     override fun onCreate() {

@@ -11,5 +11,5 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "ts4droid"
+rootProject.name = "openspeak"
 include(":ts3j", ":app")

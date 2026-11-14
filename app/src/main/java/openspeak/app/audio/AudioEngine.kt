@@ -1,4 +1,4 @@
-package ts4droid.app.audio
+package openspeak.app.audio
 
 import android.annotation.SuppressLint
 import android.content.Context
@@ -21,7 +21,7 @@ import io.github.jaredmdobson.concentus.OpusEncoder
 import io.github.jaredmdobson.concentus.OpusSignal
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import ts4droid.app.data.TalkMode
+import openspeak.app.data.TalkMode
 import kotlin.math.log10
 import kotlin.math.max
 import kotlin.math.min

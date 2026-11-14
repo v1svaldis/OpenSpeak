@@ -19,7 +19,7 @@ dependencies {
 // gradlew :ts3j:runProbe -Phost=127.0.0.1
 tasks.register<JavaExec>("runProbe") {
     classpath = sourceSets["test"].runtimeClasspath
-    mainClass.set("ts4droid.probe.Probe")
+    mainClass.set("openspeak.probe.Probe")
     args = listOf(
         (project.findProperty("host") ?: "127.0.0.1").toString(),
         (project.findProperty("port") ?: "9987").toString()
@@ -29,7 +29,7 @@ tasks.register<JavaExec>("runProbe") {
 // Second participant for end-to-end tests of the app: gradlew :ts3j:runCompanion -Pseconds=120
 tasks.register<JavaExec>("runCompanion") {
     classpath = sourceSets["test"].runtimeClasspath
-    mainClass.set("ts4droid.probe.Companion")
+    mainClass.set("openspeak.probe.Companion")
     args = listOf(
         (project.findProperty("host") ?: "127.0.0.1").toString(),
         (project.findProperty("port") ?: "9987").toString(),
@@ -40,10 +40,22 @@ tasks.register<JavaExec>("runCompanion") {
 // Creates test channels on a local server: gradlew :ts3j:runSetup -Ptoken=<server admin privilege key>
 tasks.register<JavaExec>("runSetup") {
     classpath = sourceSets["test"].runtimeClasspath
-    mainClass.set("ts4droid.probe.Setup")
+    mainClass.set("openspeak.probe.Setup")
     args = listOf(
         (project.findProperty("host") ?: "127.0.0.1").toString(),
         (project.findProperty("port") ?: "9987").toString(),
         (project.findProperty("token") ?: "").toString()
+    )
+}
+
+// Logs how other clients stream: joins every announced stream and writes all stream notifications
+// (offers, signaling JSON) to a file. gradlew :ts3j:runSniffer -Plog=capture.log
+tasks.register<JavaExec>("runSniffer") {
+    classpath = sourceSets["test"].runtimeClasspath
+    mainClass.set("openspeak.probe.StreamSniffer")
+    systemProperty("sniffer.log", (project.findProperty("log") ?: "stream-capture.log").toString())
+    args = listOf(
+        (project.findProperty("host") ?: "127.0.0.1").toString(),
+        (project.findProperty("port") ?: "9987").toString()
     )
 }

@@ -1,4 +1,4 @@
-package ts4droid.app.ts
+package openspeak.app.ts
 
 data class TsChannel(
     val id: Int,

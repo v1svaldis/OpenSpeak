@@ -1,4 +1,4 @@
-package ts4droid.app.data
+package openspeak.app.data
 
 import android.content.Context
 import com.github.manevolent.ts3j.identity.LocalIdentity
@@ -41,7 +41,7 @@ data class Bookmark(
 enum class TalkMode { PUSH_TO_TALK, VOICE_ACTIVATION, CONTINUOUS }
 
 class Prefs(context: Context) {
-    private val sp = context.getSharedPreferences("ts4droid", Context.MODE_PRIVATE)
+    private val sp = context.getSharedPreferences("openspeak", Context.MODE_PRIVATE)
 
     var bookmarks: List<Bookmark>
         get() {

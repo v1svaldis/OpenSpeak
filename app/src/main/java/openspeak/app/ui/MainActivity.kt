@@ -1,4 +1,4 @@
-package ts4droid.app.ui
+package openspeak.app.ui
 
 import android.Manifest
 import android.content.Intent
@@ -7,20 +7,18 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.ui.graphics.Color
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import ts4droid.app.data.Bookmark
-import ts4droid.app.ts.ConnState
-import ts4droid.app.ts.TsSession
+import openspeak.app.data.Bookmark
+import openspeak.app.ts.ConnState
+import openspeak.app.ts.TsSession
 
 class MainActivity : ComponentActivity() {
     private var pendingConnect: Bookmark? = null
@@ -37,16 +35,19 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(Ds.Rail.toArgbInt()),
+            navigationBarStyle = SystemBarStyle.dark(Ds.Rail.toArgbInt()),
+        )
         handleLink(intent)
         setContent {
-            MaterialTheme(colorScheme = AppColors) {
-                Surface(color = MaterialTheme.colorScheme.background) {
+            AppTheme {
+                Surface(color = Ds.Rail) {
                     val state by TsSession.state.collectAsStateWithLifecycle()
                     when (val s = state) {
                         ConnState.Connected -> ServerScreen()
                         is ConnState.Connecting -> ConnectingScreen(s.step)
-                        else -> ServerListScreen(
+                        else -> HomeScreen(
                             error = (s as? ConnState.Failed)?.reason,
                             linkBookmark = linkBookmark.value,
                             onLinkConsumed = { linkBookmark.value = null },
@@ -69,6 +70,7 @@ class MainActivity : ComponentActivity() {
         val host = uri.host ?: return
         val port = uri.getQueryParameter("port")
         linkBookmark.value = Bookmark(
+            id = 0,
             address = if (port != null) "$host:$port" else host,
             nickname = uri.getQueryParameter("nickname").orEmpty(),
             serverPassword = uri.getQueryParameter("password").orEmpty(),
@@ -93,18 +95,9 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-val AppColors = darkColorScheme(
-    primary = Color(0xFF5BA4F5),
-    onPrimary = Color(0xFF00213F),
-    primaryContainer = Color(0xFF1E3A5F),
-    onPrimaryContainer = Color(0xFFD4E3FF),
-    secondary = Color(0xFF7FD48A),
-    background = Color(0xFF101418),
-    surface = Color(0xFF101418),
-    surfaceVariant = Color(0xFF1D2329),
-    surfaceContainer = Color(0xFF181D22),
-    error = Color(0xFFFF8A80),
+private fun androidx.compose.ui.graphics.Color.toArgbInt(): Int = android.graphics.Color.argb(
+    (alpha * 255).toInt(), (red * 255).toInt(), (green * 255).toInt(), (blue * 255).toInt()
 )
 
-val TalkingGreen = Color(0xFF4CD964)
-val MutedRed = Color(0xFFFF6B6B)
+val TalkingGreen = Ds.Green
+val MutedRed = Ds.Red

@@ -1,4 +1,4 @@
-package ts4droid.probe;
+package openspeak.probe;
 
 import com.github.manevolent.ts3j.audio.Microphone;
 import com.github.manevolent.ts3j.command.ConnectionRejectedException;
@@ -110,7 +110,7 @@ public class Probe {
         });
 
         LocalTeamspeakClientSocket sender = connect(host, port, "probe-sender", false);
-        try { sender.sendChannelMessage(1, "hello from ts4droid probe"); } catch (Exception e) { System.out.println("  text send failed: " + e.getMessage()); }
+        try { sender.sendChannelMessage(1, "hello from openspeak probe"); } catch (Exception e) { System.out.println("  text send failed: " + e.getMessage()); }
 
         // 3 seconds of 440 Hz tone, 20 ms Opus frames
         OpusEncoder encoder = new OpusEncoder(48000, 1, OpusApplication.OPUS_APPLICATION_VOIP);

@@ -5,15 +5,15 @@ plugins {
 }
 
 android {
-    namespace = "ts4droid.app"
+    namespace = "openspeak.app"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "ts4droid.app"
+        applicationId = "org.openspeak.android"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
     }
 
     buildTypes {
@@ -44,6 +44,7 @@ android {
 dependencies {
     implementation(project(":ts3j"))
     implementation("io.github.jaredmdobson:concentus:1.0.2")
+    implementation("io.getstream:stream-webrtc-android:1.3.10")
 
     implementation(platform("androidx.compose:compose-bom:2024.09.03"))
     implementation("androidx.compose.ui:ui")

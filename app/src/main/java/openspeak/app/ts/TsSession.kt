@@ -1,4 +1,4 @@
-package ts4droid.app.ts
+package openspeak.app.ts
 
 import android.content.Context
 import android.content.Intent
@@ -22,6 +22,7 @@ import com.github.manevolent.ts3j.event.ClientUpdatedEvent
 import com.github.manevolent.ts3j.event.DisconnectedEvent
 import com.github.manevolent.ts3j.event.TS3Listener
 import com.github.manevolent.ts3j.event.TextMessageEvent
+import com.github.manevolent.ts3j.event.UnknownTeamspeakEvent
 import com.github.manevolent.ts3j.identity.LocalIdentity
 import com.github.manevolent.ts3j.protocol.ProtocolRole
 import com.github.manevolent.ts3j.protocol.TS3DNS
@@ -41,10 +42,11 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
-import ts4droid.app.VoiceService
-import ts4droid.app.audio.AudioEngine
-import ts4droid.app.data.Bookmark
-import ts4droid.app.data.Prefs
+import openspeak.app.VoiceService
+import openspeak.app.audio.AudioEngine
+import openspeak.app.data.Bookmark
+import openspeak.app.data.Prefs
+import openspeak.app.stream.StreamManager
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.util.concurrent.TimeoutException
@@ -96,6 +98,8 @@ object TsSession {
         private set
     private var client: LocalTeamspeakClientSocket? = null
     private var connectJob: Job? = null
+    /** Bumped on every connect/disconnect; work of an older attempt checks it and stops touching state. */
+    @Volatile private var generation = 0
     @Volatile private var userDisconnect = false
     @Volatile private var lastError: Throwable? = null
 
@@ -103,7 +107,14 @@ object TsSession {
         appContext = context.applicationContext
         prefs = Prefs(appContext)
         audio = AudioEngine(appContext)
+        streams = StreamManager(appContext, object : StreamManager.Signaling {
+            override val ownClientId: Int get() = _ownId.value
+            override fun command(name: String, vararg params: Pair<String, String>) = streamCommand(name, params)
+        })
     }
+
+    lateinit var streams: StreamManager
+        private set
 
     val ownChannelId: Int get() = _clients.value[_ownId.value]?.channelId ?: 0
 
@@ -115,43 +126,55 @@ object TsSession {
         userDisconnect = false
         lastError = null
         resetModel()
+        val gen = ++generation
         _state.value = ConnState.Connecting("Подготовка…")
         ContextCompat.startForegroundService(appContext, Intent(appContext, VoiceService::class.java))
 
         connectJob = scope.launch {
             try {
-                doConnect(bookmark)
+                doConnect(bookmark, gen)
             } catch (e: Throwable) {
+                if (gen != generation) return@launch // cancelled: disconnect() already cleaned up
                 Log.w(TAG, "connect failed", e)
                 cleanup()
-                _state.value = if (userDisconnect) ConnState.Disconnected else ConnState.Failed(describe(e))
+                _state.value = ConnState.Failed(describe(e))
             }
         }
     }
 
-    private suspend fun doConnect(bookmark: Bookmark) {
+    /** Sets the connection state only if [gen] is still the current attempt. */
+    private fun setState(gen: Int, s: ConnState) {
+        if (gen == generation) _state.value = s
+    }
+
+    private suspend fun doConnect(bookmark: Bookmark, gen: Int) {
         val identity = prefs.loadIdentity() ?: run {
-            _state.value = ConnState.Connecting("Создание личности (identity)…")
+            setState(gen, ConnState.Connecting("Создание личности (identity)…"))
             LocalIdentity.generateNew(IDENTITY_LEVEL).also { prefs.saveIdentity(it) }
         }
 
-        _state.value = ConnState.Connecting("Поиск сервера…")
+        setState(gen, ConnState.Connecting("Поиск сервера…"))
         val address = resolve(bookmark.address)
 
         val c = try {
-            openConnectionWaitingForGhost(bookmark, identity, address)
+            openConnectionWaitingForGhost(bookmark, identity, address, gen)
         } catch (e: ConnectionRejectedException) {
             // The server wants a stronger identity: raise its security level once and retry.
             val needed = e.extraMessage?.toIntOrNull()
             if (e.errorId != ConnectionRejectedException.CLIENT_COULD_NOT_VALIDATE_IDENTITY || needed == null) throw e
+            if (gen != generation) return
             cleanup(stopService = false)
-            _state.value = ConnState.Connecting("Повышение уровня безопасности личности до $needed…")
+            setState(gen, ConnState.Connecting("Повышение уровня безопасности личности до $needed…"))
             identity.improveSecurity(needed)
             prefs.saveIdentity(identity)
             lastError = null
-            openConnection(bookmark, identity, address)
+            openConnection(bookmark, identity, address, gen)
         }
-        onConnected(c)
+        if (gen != generation) {
+            runCatching { c.close() }
+            return
+        }
+        onConnected(c, gen)
     }
 
     /**
@@ -159,18 +182,19 @@ object TsSession {
      * times out and the server refuses the same identity as a "clone". Wait that out instead of failing.
      */
     private suspend fun openConnectionWaitingForGhost(
-        bookmark: Bookmark, identity: LocalIdentity, address: InetSocketAddress,
+        bookmark: Bookmark, identity: LocalIdentity, address: InetSocketAddress, gen: Int,
     ): LocalTeamspeakClientSocket {
-        val deadline = System.currentTimeMillis() + 90_000
+        val deadline = System.currentTimeMillis() + 120_000
         while (true) {
             try {
-                return openConnection(bookmark, identity, address)
+                return openConnection(bookmark, identity, address, gen)
             } catch (e: ConnectionRejectedException) {
-                if (e.errorId != CLIENT_TOO_MANY_CLONES || System.currentTimeMillis() > deadline || userDisconnect) throw e
+                if (e.errorId != CLIENT_TOO_MANY_CLONES || System.currentTimeMillis() > deadline || gen != generation) throw e
                 cleanup(stopService = false)
                 lastError = null
-                _state.value = ConnState.Connecting("Предыдущее подключение ещё активно на сервере, ждём его завершения…")
-                delay(5000)
+                setState(gen, ConnState.Connecting("Предыдущее подключение ещё активно на сервере, ждём его завершения…"))
+                // Not faster: frequent reconnects from one address trip the server's flood protection (temporary ban).
+                delay(10_000)
             }
         }
     }
@@ -178,14 +202,15 @@ object TsSession {
     private const val CLIENT_TOO_MANY_CLONES = 0x0209
 
     private fun openConnection(
-        bookmark: Bookmark, identity: LocalIdentity, address: InetSocketAddress,
+        bookmark: Bookmark, identity: LocalIdentity, address: InetSocketAddress, gen: Int,
     ): LocalTeamspeakClientSocket {
+        if (gen != generation) throw java.util.concurrent.CancellationException()
         val c = LocalTeamspeakClientSocket()
         client = c
         c.setIdentity(identity)
         c.setNickname(bookmark.nickname.ifBlank { "Android" })
         c.setClientVersion(VERSION_PLATFORM, VERSION_STRING, VERSION_SIGN)
-        c.setHWID(android.provider.Settings.Secure.getString(appContext.contentResolver, android.provider.Settings.Secure.ANDROID_ID) ?: "ts4droid")
+        c.setHWID(android.provider.Settings.Secure.getString(appContext.contentResolver, android.provider.Settings.Secure.ANDROID_ID) ?: "openspeak")
         // TeamSpeak clients send passwords as base64(SHA-1(password)), never in plain text.
         if (bookmark.defaultChannel.isNotBlank()) {
             c.setOption("client.default_channel", bookmark.defaultChannel)
@@ -206,7 +231,7 @@ object TsSession {
                 audio.onVoicePacket(p.clientId, p.packetId, p.codecData)
         }
 
-        _state.value = ConnState.Connecting("Подключение к ${address.hostString}:${address.port}…")
+        setState(gen, ConnState.Connecting("Подключение к ${address.hostString}:${address.port}…"))
         try {
             c.connect(address, null, 20000L)
         } catch (e: Exception) {
@@ -218,7 +243,7 @@ object TsSession {
         return c
     }
 
-    private suspend fun onConnected(c: LocalTeamspeakClientSocket) {
+    private suspend fun onConnected(c: LocalTeamspeakClientSocket, gen: Int) {
         _ownId.value = c.clientId
         _serverName.value = c.serverProperties["virtualserver_name"].orEmpty()
         c.serverProperties["virtualserver_welcomemessage"]?.takeIf { it.isNotBlank() }?.let {
@@ -241,14 +266,15 @@ object TsSession {
         }
         updateBitrate()
         audio.start(prefs.speakerphone)
-        _state.value = ConnState.Connected
+        setState(gen, ConnState.Connected)
+        refreshStreamInfo()
         if (_inputMuted.value || _outputMuted.value) pushMuteState()
 
         // ts3j notices timeouts itself but does not always fire an event; watch the state.
         while (scope.isActive && client === c) {
             delay(1000)
             if (c.state == ClientConnectionState.DISCONNECTED) {
-                if (!userDisconnect && _state.value == ConnState.Connected) {
+                if (gen == generation && _state.value == ConnState.Connected) {
                     cleanup()
                     _state.value = ConnState.Failed("Соединение с сервером потеряно")
                 }
@@ -277,14 +303,21 @@ object TsSession {
         return InetSocketAddress(InetAddress.getByName(host), port ?: DEFAULT_PORT)
     }
 
+    /**
+     * Leaves the server or cancels a connection attempt. The UI switches back at once; saying goodbye to
+     * the server happens in the background, since a blocked or unreachable socket can take a while.
+     */
     fun disconnect() {
         userDisconnect = true
+        generation++
         val c = client
-        scope.launch {
-            runCatching { withTimeoutOrNull(3000) { c?.disconnect("Leaving") } }
-            cleanup()
-            connectJob?.cancel()
-            _state.value = ConnState.Disconnected
+        val wasConnected = c?.isConnected == true
+        connectJob?.cancel()
+        _state.value = ConnState.Disconnected
+        cleanup(closeSocket = false)
+        if (c != null) scope.launch {
+            if (wasConnected) runCatching { withTimeoutOrNull(3000) { c.disconnect("Leaving") } }
+            runCatching { c.close() }
         }
     }
 
@@ -293,12 +326,14 @@ object TsSession {
         if (_state.value is ConnState.Failed) _state.value = ConnState.Disconnected
     }
 
-    private fun cleanup(stopService: Boolean = true) {
+    private fun cleanup(stopService: Boolean = true, closeSocket: Boolean = true) {
         audio.voiceSink = null
         audio.stop()
+        streams.reset()
         val c = client
         client = null
-        runCatching { c?.close() }
+        // Closing also wakes up a connect() that is still waiting for the server.
+        if (closeSocket) runCatching { c?.close() }
         if (stopService) appContext.stopService(Intent(appContext, VoiceService::class.java))
     }
 
@@ -388,6 +423,64 @@ object TsSession {
                 }
             }
         }
+    }
+
+    /** Stream signaling must reach the server in order, so it goes through one sequential queue. */
+    private val streamCommands = java.util.concurrent.Executors.newSingleThreadExecutor()
+
+    private fun streamCommand(name: String, params: Array<out Pair<String, String>>) {
+        val c = client ?: return
+        Log.d(TAG, "-> $name")
+        streamCommands.execute {
+            try {
+                val cmd = SingleCommand(name, ProtocolRole.CLIENT)
+                params.forEach { (k, v) -> cmd.add(CommandSingleParameter(k, v)) }
+                c.executeCommand(cmd)
+            } catch (e: Exception) {
+                Log.w(TAG, "$name failed: $e")
+            }
+        }
+    }
+
+    /** Asks the server which streams the clients in our channel are running (it announces new ones by itself). */
+    private fun refreshStreamInfo() {
+        val own = ownChannelId
+        val ids = _clients.value.values.filter { it.channelId == own && it.id != _ownId.value }.map { it.id }
+        scope.launch {
+            for (id in ids) {
+                streamCommand("requeststreaminfo", arrayOf("clid" to id.toString()))
+                delay(400) // stay clear of the server's flood protection
+            }
+        }
+    }
+
+    private var pendingProjection: Intent? = null
+
+    /** Step 1 of screen sharing: the user granted MediaProjection; the service must become a media-projection service first. */
+    fun requestScreenShare(projectionData: Intent) {
+        if (_state.value != ConnState.Connected) return
+        pendingProjection = projectionData
+        ContextCompat.startForegroundService(
+            appContext, Intent(appContext, VoiceService::class.java).setAction(VoiceService.ACTION_SCREEN_SHARE)
+        )
+    }
+
+    /** Step 2, called by [VoiceService] once it runs as a media-projection foreground service. */
+    fun onScreenShareServiceReady() {
+        val data = pendingProjection ?: return
+        pendingProjection = null
+        val metrics = appContext.resources.displayMetrics
+        // Keep the long side at most 1280 px: plenty for a phone screen and light on the encoder.
+        val scale = minOf(1f, 1280f / maxOf(metrics.widthPixels, metrics.heightPixels))
+        val w = (metrics.widthPixels * scale).toInt() and -2
+        val h = (metrics.heightPixels * scale).toInt() and -2
+        val nick = _clients.value[_ownId.value]?.nickname ?: "Android"
+        streams.startScreenShare(data, "Экран $nick", w, h, 15)
+    }
+
+    fun stopScreenShare() {
+        streams.stopScreenShare()
+        appContext.startService(Intent(appContext, VoiceService::class.java).setAction(VoiceService.ACTION_SCREEN_SHARE_STOPPED))
     }
 
     private fun sendCodec(): CodecType =
@@ -490,6 +583,7 @@ object TsSession {
             }
             if (e.clientId == _ownId.value) {
                 updateBitrate()
+                refreshStreamInfo()
                 // Moved by someone else (or the server) — tell the user.
                 if (e.map.int("reasonid") == 1 && e.invokerId != _ownId.value)
                     _notices.tryEmit("Вас переместил ${e.invokerName}")
@@ -499,6 +593,11 @@ object TsSession {
         override fun onClientLeave(e: ClientLeaveEvent) {
             _clients.update { it - e.clientId }
             audio.removeSpeaker(e.clientId)
+            streams.onClientLeft(e.clientId)
+        }
+
+        override fun onUnknownEvent(e: UnknownTeamspeakEvent) {
+            streams.onNotify(e.command, e.map)
         }
 
         override fun onClientChanged(e: ClientUpdatedEvent) {

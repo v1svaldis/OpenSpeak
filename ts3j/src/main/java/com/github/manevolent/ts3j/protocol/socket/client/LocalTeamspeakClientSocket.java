@@ -450,7 +450,14 @@ public class LocalTeamspeakClientSocket
 
     @Override
     public void close() throws IOException {
-        socket.close();
+        // Wake up anyone blocked in connect()/waitForState() instead of leaving them to time out.
+        if (getState() != null && getState() != ClientConnectionState.DISCONNECTED) {
+            try {
+                setState(ClientConnectionState.DISCONNECTED);
+            } catch (TimeoutException ignored) {
+            }
+        }
+        if (socket != null) socket.close();
         commandExecutionService.shutdown();
     }
 

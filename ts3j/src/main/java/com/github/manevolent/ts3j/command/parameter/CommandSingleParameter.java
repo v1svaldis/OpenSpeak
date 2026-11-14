@@ -20,7 +20,8 @@ public class CommandSingleParameter implements CommandParameter {
         if (value == null)
             return "";
         else
-            return (key + "=" + Ts3String.escape(value.trim()));
+            // Values are sent verbatim: trailing line breaks matter, e.g. an SDP must end with CRLF.
+            return (key + "=" + Ts3String.escape(value));
     }
 
     @Override

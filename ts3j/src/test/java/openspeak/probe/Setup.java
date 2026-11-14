@@ -1,4 +1,4 @@
-package ts4droid.probe;
+package openspeak.probe;
 
 import com.github.manevolent.ts3j.command.SingleCommand;
 import com.github.manevolent.ts3j.command.parameter.CommandSingleParameter;
